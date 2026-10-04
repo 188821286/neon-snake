@@ -2,37 +2,59 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>霓虹多食物贪食蛇</title>
 <style>
+*{box-sizing:border-box}
+html{background:#030008}
 body{
   margin:0;
-  height:100vh;
+  min-height:100svh;
+  padding:16px 12px max(16px,env(safe-area-inset-bottom));
   background:radial-gradient(circle,#1b0040,#030008 75%);
   display:flex;
   justify-content:center;
   align-items:center;
-  overflow:hidden;
+  flex-direction:column;
+  gap:12px;
   font-family:Arial,"Microsoft YaHei";
   color:white;
 }
 #info{
-  position:absolute;
-  top:22px;
-  font-size:24px;
+  font-size:clamp(16px,4.5vw,24px);
   text-shadow:0 0 15px #00ffff;
 }
 canvas{
+  width:min(500px, calc(100vw - 28px), 55svh);
+  height:auto;
+  aspect-ratio:1;
+  touch-action:none;
   background:rgba(0,0,0,.35);
   border:3px solid #00ffff;
   border-radius:16px;
   box-shadow:0 0 25px #00ffff,inset 0 0 30px #ff00ff;
 }
+button{font:inherit;color:white;background:#210d3b;border:1px solid #00ffff;border-radius:12px;min-height:48px;padding:10px 18px;touch-action:manipulation;cursor:pointer}
+button:active{background:#58318a}
+.actions{display:flex;gap:10px}
+.pad{display:grid;grid-template-columns:repeat(3,56px);gap:6px}
+.pad button{padding:0;font-size:24px;min-height:48px}
+.up{grid-column:2}.left{grid-column:1}.down{grid-column:2}.right{grid-column:3}
+.hint{margin:0;font-size:13px;color:#cfbbeb;text-align:center}
 </style>
 </head>
 <body>
 
 <div id="info">得分：<span id="score">0</span>　速度：<span id="speed">普通</span></div>
 <canvas id="game" width="500" height="500"></canvas>
+<div class="actions"><button id="start">开始游戏</button><button id="restart">重新开始</button></div>
+<div class="pad" aria-label="方向控制">
+<button class="up" data-dir="up" aria-label="向上">↑</button>
+<button class="left" data-dir="left" aria-label="向左">←</button>
+<button class="down" data-dir="down" aria-label="向下">↓</button>
+<button class="right" data-dir="right" aria-label="向右">→</button>
+</div>
+<p class="hint">滑动游戏区域或点击方向按钮 · 电脑支持方向键和空格</p>
 
 <script>
 const canvas = document.getElementById("game");
@@ -47,6 +69,8 @@ let snake, food, dx, dy, score, gameOver;
 let speed = 120;
 let lastMove = 0;
 let particles = [];
+let started = false, paused = false, turnQueued = false;
+const startButton = document.getElementById('start');
 
 const foods = [
   {emoji:"🍎", type:"normal", score:1,  text:"普通", color:"#ff1744"},
@@ -64,6 +88,9 @@ function reset(){
   speed = 120;
   gameOver = false;
   particles = [];
+  lastMove = performance.now();
+  turnQueued = false;
+  paused = false;
   scoreEl.textContent = score;
   speedEl.textContent = "普通";
 }
@@ -74,9 +101,13 @@ function rand(n){
 
 function createFood(){
   const item = foods[rand(foods.length)];
+  const free = [];
+  for(let y=0;y<count;y++) for(let x=0;x<count;x++){
+    if(!snake.some(p=>p.x===x && p.y===y)) free.push({x,y});
+  }
+  if(!free.length) return null;
   return {
-    x: rand(count),
-    y: rand(count),
+    ...free[rand(free.length)],
     ...item
   };
 }
@@ -123,6 +154,7 @@ function drawSnake(){
 }
 
 function drawFood(){
+  if(!food) return;
   const pulse = Math.sin(Date.now()/150)*3 + 16;
 
   ctx.font = `${pulse}px Arial`;
@@ -154,6 +186,7 @@ function drawParticles(){
 }
 
 function moveSnake(){
+  turnQueued = false;
   const head = {
     x: snake[0].x + dx,
     y: snake[0].y + dy
@@ -164,7 +197,8 @@ function moveSnake(){
     return;
   }
 
-  for(const p of snake){
+  const eating = food && head.x === food.x && head.y === food.y;
+  for(const p of eating ? snake : snake.slice(0,-1)){
     if(p.x === head.x && p.y === head.y){
       gameOver = true;
       return;
@@ -197,6 +231,7 @@ function moveSnake(){
     scoreEl.textContent = score;
     addParticles(food.x, food.y, food.color);
     food = createFood();
+    if(!food) gameOver = true;
   }else{
     snake.pop();
   }
@@ -211,11 +246,11 @@ function drawGameOver(){
   ctx.shadowBlur = 30;
   ctx.shadowColor = "#ff00ff";
   ctx.font = "46px Arial";
-  ctx.fillText("GAME OVER",250,220);
+  ctx.fillText(food ? "GAME OVER" : "YOU WIN!",250,220);
 
   ctx.font = "22px Arial";
   ctx.shadowColor = "#00ffff";
-  ctx.fillText("按空格重新开始",250,270);
+  ctx.fillText("点击重新开始 / 按空格",250,270);
 }
 
 function loop(time){
@@ -228,28 +263,52 @@ function loop(time){
   drawParticles();
   drawSnake();
 
-  if(!gameOver && time - lastMove > speed){
+  if(started && !paused && !gameOver && time - lastMove > speed){
     moveSnake();
     lastMove = time;
   }
 
   if(gameOver){
     drawGameOver();
+    startButton.textContent = '再玩一次';
+  }else if(!started || paused){
+    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(0,0,500,500);
+    ctx.shadowBlur=0;ctx.fillStyle='white';ctx.textAlign='center';ctx.font='32px Arial';
+    ctx.fillText(paused ? '已暂停' : '霓虹贪食蛇',250,220);
+    ctx.font='22px Arial';ctx.fillText(paused ? '点击继续游戏' : '点击开始游戏',250,270);
   }
 
   requestAnimationFrame(loop);
 }
 
-document.addEventListener("keydown",e=>{
-  if(gameOver && e.code === "Space"){
-    reset();
-    return;
-  }
-
-  if(e.key === "ArrowUp" && dy !== 1){ dx=0; dy=-1; }
-  if(e.key === "ArrowDown" && dy !== -1){ dx=0; dy=1; }
-  if(e.key === "ArrowLeft" && dx !== 1){ dx=-1; dy=0; }
-  if(e.key === "ArrowRight" && dx !== -1){ dx=1; dy=0; }
+function turn(direction){
+  if(!started || paused || gameOver || turnQueued) return;
+  const [x,y] = {up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]}[direction];
+  if((x===-dx && y===-dy) || (x===dx && y===dy)) return;
+  dx=x;dy=y;turnQueued=true;
+}
+function toggle(){
+  if(!started || gameOver){reset();started=true;}else paused=!paused;
+  lastMove=performance.now();startButton.textContent=paused ? '继续游戏' : '暂停';
+}
+startButton.addEventListener('click',toggle);
+document.getElementById('restart').addEventListener('click',()=>{reset();started=true;startButton.textContent='暂停';});
+document.querySelectorAll('[data-dir]').forEach(button=>button.addEventListener('pointerdown',e=>{e.preventDefault();turn(button.dataset.dir);}));
+let gesture=null;
+canvas.addEventListener('pointerdown',e=>{if(!e.isPrimary)return;gesture={x:e.clientX,y:e.clientY,id:e.pointerId};canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointermove',e=>{
+  if(!gesture || gesture.id!==e.pointerId)return;
+  const x=e.clientX-gesture.x,y=e.clientY-gesture.y;
+  if(Math.max(Math.abs(x),Math.abs(y))<15)return;
+  turn(Math.abs(x)>Math.abs(y) ? (x>0?'right':'left') : (y>0?'down':'up'));
+  gesture.x=e.clientX;gesture.y=e.clientY;
+});
+['pointerup','pointercancel','lostpointercapture'].forEach(type=>canvas.addEventListener(type,()=>{gesture=null;}));
+document.addEventListener('visibilitychange',()=>{if(document.hidden && started && !gameOver){paused=true;startButton.textContent='继续游戏';}});
+document.addEventListener('keydown',e=>{
+  const directions={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'};
+  if(directions[e.key]){e.preventDefault();turn(directions[e.key]);}
+  if(e.code==='Space' && e.target.tagName!=='BUTTON'){e.preventDefault();if(!e.repeat)toggle();}
 });
 
 reset();
